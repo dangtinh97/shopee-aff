@@ -1,0 +1,8 @@
+{
+  "abc123": {
+    "title": "Video cực hay",
+    "description": "Xem ngay",
+    "image": "https://example.com/thumb.jpg",
+    "target": "https://youtube.com/watch?v=xxxx"
+  }
+}
