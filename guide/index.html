@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Xiaozhi Device Setup Guide</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090b0f;
+      --panel: #141820;
+      --panel-2: #1b202a;
+      --text: #f6f8fb;
+      --muted: #aab2c0;
+      --line: #303744;
+      --blue: #5ba8ff;
+      --red: #ff3030;
+      --green: #5de28c;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 18% 12%, rgba(91, 168, 255, 0.18), transparent 28rem),
+        linear-gradient(180deg, #0e1118 0%, var(--bg) 46%, #07080b 100%);
+      color: var(--text);
+    }
+
+    a {
+      color: inherit;
+    }
+
+    figure {
+      margin: 0;
+    }
+
+    .page {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 34px 0 54px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+      gap: 28px;
+      align-items: center;
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(20, 24, 32, 0.82);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 740px;
+      font-size: clamp(34px, 5vw, 64px);
+      line-height: 1.02;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      margin: 18px 0 0;
+      max-width: 680px;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.65;
+    }
+
+    .tabs {
+      display: inline-grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      margin-top: 26px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0d1016;
+    }
+
+    .tab-button {
+      border: 0;
+      border-radius: 6px;
+      padding: 11px 16px;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin-top: 22px;
+    }
+
+    .download-android {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 54px;
+      padding: 12px 18px;
+      border: 1px solid #3b4350;
+      border-radius: 8px;
+      background: #050608;
+      color: #fff;
+      font-weight: 800;
+      text-decoration: none;
+      box-shadow: 0 12px 26px rgba(0, 0, 0, 0.28);
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+
+    .download-android:hover {
+      transform: translateY(-1px);
+      border-color: #5ba8ff;
+      background: #0b0f16;
+    }
+
+    .download-android::before {
+      content: "";
+      width: 26px;
+      height: 28px;
+      flex: 0 0 auto;
+      background: linear-gradient(135deg, #00f076 0 32%, #00d2ff 32% 62%, #ffde3b 62% 78%, #ff4b55 78% 100%);
+      clip-path: polygon(8% 2%, 96% 50%, 8% 98%);
+    }
+
+    .download-android span {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      opacity: 0.72;
+    }
+
+    .download-android [data-lang] {
+      display: none !important;
+    }
+
+    body.lang-vi .download-android [data-lang="vi"],
+    body.lang-en .download-android [data-lang="en"] {
+      display: block !important;
+    }
+
+    .download-android strong {
+      display: block;
+      margin-top: 1px;
+      font-size: 17px;
+      line-height: 1.1;
+    }
+
+    .tab-button[aria-selected="true"] {
+      background: var(--blue);
+      color: #06111f;
+    }
+
+    .activation-card {
+      justify-self: center;
+      width: min(270px, 100%);
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #000;
+    }
+
+    .activation-card img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .steps {
+      display: grid;
+      gap: 24px;
+      margin-top: 28px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+      gap: 24px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(20, 24, 32, 0.72);
+    }
+
+    .step-copy {
+      align-self: start;
+      position: sticky;
+      top: 18px;
+    }
+
+    .step-number {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 42px;
+      height: 42px;
+      margin-bottom: 14px;
+      border: 1px solid rgba(91, 168, 255, 0.55);
+      border-radius: 8px;
+      background: rgba(91, 168, 255, 0.13);
+      color: #cfe6ff;
+      font-weight: 800;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 25px;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    .step-copy p {
+      margin: 12px 0 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .image-frame {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #050607;
+    }
+
+    .image-frame img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .image-frame.phone {
+      width: min(330px, 100%);
+      margin-inline: auto;
+    }
+
+    .image-pair {
+      display: grid;
+      grid-template-columns: minmax(180px, 0.42fr) minmax(0, 1fr);
+      gap: 16px;
+      align-items: center;
+    }
+
+    .add-device-marker {
+      display: none!important;
+      position: absolute;
+      left: 82.2%;
+      top: 63.8%;
+      width: 10.2%;
+      height: 33%;
+      border: max(3px, 0.22vw) solid var(--red);
+      border-radius: 999px;
+      transform: translate(-50%, -50%);
+      box-shadow:
+        0 0 0 4px rgba(255, 48, 48, 0.16),
+        0 0 22px rgba(255, 48, 48, 0.55);
+      pointer-events: none;
+    }
+
+    .add-device-marker::after {
+      content: "";
+      position: absolute;
+      right: -18%;
+      top: 55%;
+      width: 34%;
+      height: 3px;
+      background: var(--red);
+      transform: rotate(18deg);
+      transform-origin: left center;
+      border-radius: 999px;
+    }
+
+    .code-box {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 16px;
+      padding: 12px 15px;
+      border: 1px solid rgba(91, 168, 255, 0.45);
+      border-radius: 8px;
+      background: #0e141e;
+      color: #dcecff;
+      font-weight: 800;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    .contact {
+      margin-top: 24px;
+      padding: 20px 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(20, 24, 32, 0.72);
+    }
+
+    .contact h2 {
+      font-size: 22px;
+    }
+
+    .contact p {
+      margin: 10px 0 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .contact-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 14px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      background: #1877f2;
+      color: #fff;
+      font-weight: 800;
+      text-decoration: none;
+    }
+
+    .contact-link::before {
+      content: "f";
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #fff;
+      color: #1877f2;
+      font-family: Arial, sans-serif;
+      font-size: 18px;
+      font-weight: 900;
+    }
+
+    [data-lang] {
+      display: none;
+    }
+
+    body.lang-vi [data-lang="vi"],
+    body.lang-en [data-lang="en"] {
+      display: revert;
+    }
+
+    @media (max-width: 860px) {
+      .page {
+        width: min(100% - 22px, 680px);
+        padding-top: 18px;
+      }
+
+      .hero,
+      .step {
+        grid-template-columns: 1fr;
+        padding: 18px;
+      }
+
+      .activation-card {
+        width: min(230px, 100%);
+      }
+
+      .step-copy {
+        position: static;
+      }
+
+      .image-pair {
+        grid-template-columns: 1fr;
+      }
+
+      h1 {
+        font-size: clamp(32px, 10vw, 48px);
+      }
+
+      .lead {
+        font-size: 16px;
+      }
+    }
+  </style>
+</head>
+<body class="lang-vi">
+  <main class="page">
+    <section class="hero">
+      <div>
+        <p class="eyebrow" data-lang="vi">Hướng dẫn kết nối thiết bị</p>
+        <p class="eyebrow" data-lang="en">Device connection guide</p>
+
+        <h1 data-lang="vi">Thêm thiết bị vào Xiaozhi Console</h1>
+        <h1 data-lang="en">Add your device to Xiaozhi Console</h1>
+
+        <p class="lead" data-lang="vi">
+          Làm theo 3 bước bên dưới để đăng nhập, bấm Add Device, sau đó nhập mã kích hoạt hiện trên màn hình thiết bị.
+        </p>
+        <p class="lead" data-lang="en">
+          Follow the 3 steps below to sign in, select Add Device, then enter the activation code shown on your device screen.
+        </p>
+
+        <div class="hero-actions">
+          <a class="download-android" href="https://play.google.com/store/apps/details?id=com.vudangtinh.emodesk" target="_blank" rel="noopener">
+            <span data-lang="vi">Tải ứng dụng</span>
+            <span data-lang="en">Download app</span>
+            <strong>Android</strong>
+          </a>
+        </div>
+
+        <div class="tabs" role="tablist" aria-label="Language">
+          <button class="tab-button" type="button" role="tab" aria-selected="true" data-set-lang="vi">Tiếng Việt</button>
+          <button class="tab-button" type="button" role="tab" aria-selected="false" data-set-lang="en">English</button>
+        </div>
+      </div>
+
+      <figure class="activation-card">
+        <img src="activation-code.jpg" alt="Activation code on EmoDesk device screen">
+      </figure>
+    </section>
+
+    <section class="steps" aria-label="Setup steps">
+      <article class="step">
+        <div class="step-copy">
+          <span class="step-number">1</span>
+          <h2 data-lang="vi">Đăng nhập vào Xiaozhi</h2>
+          <h2 data-lang="en">Sign in to Xiaozhi</h2>
+          <p data-lang="vi">
+            Mở <a href="https://xiaozhi.me/">https://xiaozhi.me/</a>, nhập thông tin đăng nhập của bạn, rồi vào Xiaozhi Console.
+          </p>
+          <p data-lang="en">
+            Open <a href="https://xiaozhi.me/">https://xiaozhi.me/</a>, enter your login details, then go to Xiaozhi Console.
+          </p>
+        </div>
+        <figure class="image-frame">
+          <img src="login.jpg" alt="Xiaozhi Console login screen">
+        </figure>
+      </article>
+
+      <article class="step">
+        <div class="step-copy">
+          <span class="step-number">2</span>
+          <h2 data-lang="vi">Chọn Add Device</h2>
+          <h2 data-lang="en">Select Add Device</h2>
+          <p data-lang="vi">
+            Trong trang Agents, bấm nút Add Device được khoanh đỏ ở bên phải màn hình.
+          </p>
+          <p data-lang="en">
+            On the Agents page, click the Add Device button highlighted in red on the right side of the screen.
+          </p>
+        </div>
+        <figure class="image-frame">
+          <img src="add-device.jpg" alt="Add Device button on Xiaozhi Console Agents page">
+          <span class="add-device-marker" aria-hidden="true"></span>
+        </figure>
+      </article>
+
+      <article class="step">
+        <div class="step-copy">
+          <span class="step-number">3</span>
+          <h2 data-lang="vi">Nhập mã kích hoạt</h2>
+          <h2 data-lang="en">Enter the activation code</h2>
+          <p data-lang="vi">
+            Lấy mã trên ảnh đầu tiên của thiết bị, nhập vào hộp mã trên website, sau đó hoàn tất kết nối.
+          </p>
+          <p data-lang="en">
+            Use the code from the first device image, enter it into the code field on the website, then finish pairing.
+          </p>
+          <div class="code-box" aria-label="Activation code">18785x</div>
+        </div>
+        <div class="image-pair">
+          <figure class="image-frame phone">
+            <img src="activation-code.jpg" alt="Activation code 18785x shown on device">
+          </figure>
+          <figure class="image-frame">
+            <img src="device-screen.jpg" alt="Device welcome and settings screen">
+          </figure>
+        </div>
+      </article>
+    </section>
+
+    <section class="contact" aria-label="Contact">
+      <h2 data-lang="vi">Thông tin liên hệ</h2>
+      <h2 data-lang="en">Contact information</h2>
+      <p data-lang="vi">Nếu cần hỗ trợ thêm, bạn có thể liên hệ qua Facebook.</p>
+      <p data-lang="en">For more support, you can contact us on Facebook.</p>
+      <a class="contact-link" href="https://www.facebook.com/dangtinhhaui/" target="_blank" rel="noopener">
+        Facebook
+      </a>
+    </section>
+  </main>
+
+  <script>
+    const buttons = document.querySelectorAll("[data-set-lang]");
+
+    function setLanguage(lang) {
+      document.body.classList.toggle("lang-vi", lang === "vi");
+      document.body.classList.toggle("lang-en", lang === "en");
+      document.documentElement.lang = lang;
+      buttons.forEach((button) => {
+        button.setAttribute("aria-selected", String(button.dataset.setLang === lang));
+      });
+    }
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => setLanguage(button.dataset.setLang));
+    });
+  </script>
+</body>
+</html>
