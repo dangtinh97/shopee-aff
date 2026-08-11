@@ -3,14 +3,20 @@
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MQTT_REQUEST_TOPIC = "shopee/aff";
 const MQTT_RESPONSE_TOPIC = "shopee/aff/response";
+const MQTT_ERROR_LINK_TOPIC = "error_link";
 const MQTT_BROKER_URL = "ws://myoupip.com:8083";
 const MQTT_KEEPALIVE_SECONDS = 30;
 const MQTT_RECONNECT_DELAY_MS = 3_000;
 const MQTT_HEARTBEAT_ALARM = "mqtt-heartbeat";
 const MQTT_HEARTBEAT_PERIOD_MINUTES = 1;
+const LINK_CHECK_ALARM = "link-check";
+const LINK_CHECK_PERIOD_MINUTES = 0.5;
+const LINK_CHECK_STATUS_STORAGE_KEY = "linkCheckStatus";
+const REQUIRED_CUSTOM_LINK_URL = "https://affiliate.shopee.vn/offer/custom_link";
 const CONFIG_STORAGE_KEY = "config";
 const DEFAULT_CONFIG = {
-  devMode: true
+  devMode: true,
+  linkCheckEnabled: false
 };
 
 let mqttSocket;
@@ -18,6 +24,7 @@ let mqttPacketId = 1;
 let mqttPingTimer;
 let mqttReconnectTimer;
 let mqttConnected = false;
+let pendingMqttPublishes = [];
 let mqttStatus = {
   connected: false,
   brokerUrl: MQTT_BROKER_URL,
@@ -75,8 +82,20 @@ async function getConfig() {
   return {
     ...DEFAULT_CONFIG,
     ...storedConfig,
-    devMode: storedConfig.devMode ?? storedConfig.testMode ?? DEFAULT_CONFIG.devMode
+    devMode: storedConfig.devMode ?? storedConfig.testMode ?? DEFAULT_CONFIG.devMode,
+    linkCheckEnabled: storedConfig.linkCheckEnabled ?? DEFAULT_CONFIG.linkCheckEnabled
   };
+}
+
+async function setConfig(configPatch) {
+  const config = await getConfig();
+
+  await chrome.storage.local.set({
+    [CONFIG_STORAGE_KEY]: {
+      ...config,
+      ...configPatch
+    }
+  });
 }
 
 async function generateFromMqttPayload(payload) {
@@ -269,7 +288,42 @@ function sendMqttPacket(packet) {
 }
 
 function publishMqttResponse(response) {
-  sendMqttPacket(buildPublishPacket(MQTT_RESPONSE_TOPIC, response));
+  publishMqttTopic(MQTT_RESPONSE_TOPIC, response);
+}
+
+function publishMqttTopic(topic, payload) {
+  if (isMqttSocketOpen()) {
+    sendMqttPacket(buildPublishPacket(topic, payload));
+    return;
+  }
+
+  pendingMqttPublishes.push({
+    topic,
+    payload
+  });
+  ensureMqttConnected();
+}
+
+function publishErrorLink(payload) {
+  publishMqttTopic(MQTT_ERROR_LINK_TOPIC, payload);
+  publishMqttResponse({
+    ...payload,
+    topic: MQTT_ERROR_LINK_TOPIC
+  });
+}
+
+function flushPendingMqttPublishes() {
+  if (!isMqttSocketOpen() || pendingMqttPublishes.length === 0) {
+    return;
+  }
+
+  const publishes = pendingMqttPublishes;
+
+  pendingMqttPublishes = [];
+
+  publishes.forEach(({ topic, payload }) => {
+    sendMqttPacket(buildPublishPacket(topic, payload));
+  });
 }
 
 function startMqttKeepalive() {
@@ -327,6 +381,7 @@ function handleMqttPacket(bytes) {
       lastEvent: "connected"
     });
     sendMqttPacket(buildSubscribePacket(MQTT_REQUEST_TOPIC));
+    flushPendingMqttPublishes();
     startMqttKeepalive();
     return;
   }
@@ -405,13 +460,105 @@ function setupMqttHeartbeat() {
   });
 }
 
+function setupLinkCheckAlarm() {
+  chrome.alarms.create(LINK_CHECK_ALARM, {
+    periodInMinutes: LINK_CHECK_PERIOD_MINUTES
+  });
+}
+
+async function getCurrentTab() {
+  const [tab] = await chrome.tabs.query({
+    active: true,
+    lastFocusedWindow: true
+  });
+
+  return tab;
+}
+
+function isRequiredCustomLinkUrl(url) {
+  try {
+    const parsedUrl = new URL(url);
+    const requiredUrl = new URL(REQUIRED_CUSTOM_LINK_URL);
+
+    return (
+      parsedUrl.origin === requiredUrl.origin &&
+      parsedUrl.pathname === requiredUrl.pathname
+    );
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function disableLinkCheck() {
+  await setConfig({
+    linkCheckEnabled: false
+  });
+}
+
+async function setLinkCheckStatus(statusPatch) {
+  await chrome.storage.local.set({
+    [LINK_CHECK_STATUS_STORAGE_KEY]: {
+      ...statusPatch,
+      updatedAt: Date.now()
+    }
+  });
+}
+
+async function checkCurrentTabLink(tabSnapshot) {
+  const config = await getConfig();
+
+  if (!config.linkCheckEnabled) {
+    const result = {
+      enabled: false,
+      ok: true,
+      reason: "disabled"
+    };
+
+    await setLinkCheckStatus(result);
+    return result;
+  }
+
+  const tab = tabSnapshot || await getCurrentTab();
+  const currentUrl = tab?.url || "";
+
+  if (isRequiredCustomLinkUrl(currentUrl)) {
+    const result = {
+      enabled: true,
+      ok: true,
+      currentUrl,
+      tabId: tab?.id
+    };
+
+    await setLinkCheckStatus(result);
+    return result;
+  }
+
+  const result = {
+    enabled: false,
+    ok: false,
+    topic: MQTT_ERROR_LINK_TOPIC,
+    requiredUrl: REQUIRED_CUSTOM_LINK_URL,
+    currentUrl,
+    tabId: tab?.id,
+    checkedAt: Date.now()
+  };
+
+  publishErrorLink(result);
+  await disableLinkCheck();
+  await setLinkCheckStatus(result);
+
+  return result;
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   setupMqttHeartbeat();
+  setupLinkCheckAlarm();
   ensureMqttConnected();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   setupMqttHeartbeat();
+  setupLinkCheckAlarm();
   ensureMqttConnected();
 });
 
@@ -427,22 +574,48 @@ chrome.runtime.onSuspend.addListener(() => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === MQTT_HEARTBEAT_ALARM) {
     ensureMqttConnected();
+    return;
+  }
+
+  if (alarm.name === LINK_CHECK_ALARM) {
+    ensureMqttConnected();
+    checkCurrentTabLink().catch((error) => {
+      publishErrorLink({
+        topic: MQTT_ERROR_LINK_TOPIC,
+        error: error.message || "Check link that bai.",
+        checkedAt: Date.now()
+      });
+    });
   }
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (
-    message?.source !== "shopee-affiliate-extension-popup" ||
-    message.type !== "GET_MQTT_STATUS"
-  ) {
+  if (message?.source !== "shopee-affiliate-extension-popup") {
     return false;
   }
 
-  ensureMqttConnected();
-  sendResponse(mqttStatus);
+  if (message.type === "GET_MQTT_STATUS") {
+    ensureMqttConnected();
+    sendResponse(mqttStatus);
+
+    return false;
+  }
+
+  if (message.type === "CHECK_CURRENT_TAB_LINK_NOW") {
+    ensureMqttConnected();
+    checkCurrentTabLink(message.payload?.tab)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({
+        ok: false,
+        error: error.message || "Check link that bai."
+      }));
+
+    return true;
+  }
 
   return false;
 });
 
 setupMqttHeartbeat();
+setupLinkCheckAlarm();
 ensureMqttConnected();

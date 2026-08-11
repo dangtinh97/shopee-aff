@@ -10,12 +10,30 @@
       font-family: Arial, sans-serif;
     }
 
-    body {
-      width: 380px;
+    html {
+      width: max-content;
       margin: 0;
-      padding: 16px;
+      background: transparent;
+      overflow: hidden;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
       background: #ffffff;
       color: #1f2933;
+      overflow: hidden;
+    }
+
+    .popup-shell {
+      width: 380px;
+      padding: 16px;
+      background: #ffffff;
     }
 
     label {
@@ -27,7 +45,6 @@
 
     input,
     textarea {
-      box-sizing: border-box;
       width: 100%;
       padding: 10px;
       border: 1px solid #c8d0d8;
@@ -141,7 +158,8 @@
       color: #17663a;
     }
 
-    #modeStatus {
+    #modeStatus,
+    #linkCheckStatus {
       margin-top: 0;
       margin-bottom: 12px;
       min-height: auto;
@@ -156,6 +174,16 @@
     #modeStatus[data-state="live"] {
       background: #eefaf1;
       color: #17663a;
+    }
+
+    #linkCheckStatus[data-state="enabled"] {
+      background: #eefaf1;
+      color: #17663a;
+    }
+
+    #linkCheckStatus[data-state="disabled"] {
+      background: #f4f6f8;
+      color: #52616f;
     }
 
     #mqttStatus {
@@ -177,7 +205,8 @@
   </style>
 </head>
 <body>
-<label for="url"><a href="https://affiliate.shopee.vn/offer/custom_link" target="_blank">Shopee URL</a></label>
+<main class="popup-shell">
+  <label for="url"><a href="https://affiliate.shopee.vn/offer/custom_link" target="_blank">Shopee URL</a></label>
   <textarea id="url" placeholder="https://shopee.vn/..."></textarea>
   <label for="subId1">Sub ID 1</label>
   <input id="subId1" type="text" placeholder="SUB ID 1">
@@ -187,9 +216,16 @@
     <span class="switch-track" aria-hidden="true"></span>
   </label>
   <output id="modeStatus" aria-live="polite"></output>
+  <label class="switch-row" for="linkCheckMode">
+    <input id="linkCheckMode" type="checkbox">
+    <span>Check current tab link</span>
+    <span class="switch-track" aria-hidden="true"></span>
+  </label>
+  <output id="linkCheckStatus" aria-live="polite"></output>
   <output id="mqttStatus" aria-live="polite"></output>
   <button id="run" type="button">Generate</button>
   <output id="result" aria-live="polite"></output>
+</main>
   <script src="popup.js"></script>
 </body>
 </html>
