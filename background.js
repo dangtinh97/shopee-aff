@@ -12,6 +12,8 @@ const MQTT_HEARTBEAT_PERIOD_MINUTES = 1;
 const LINK_CHECK_ALARM = "link-check";
 const LINK_CHECK_PERIOD_MINUTES = 0.5;
 const LINK_CHECK_STATUS_STORAGE_KEY = "linkCheckStatus";
+const MQTT_QUEUE_DELAY_MIN_MS = 3_000;
+const MQTT_QUEUE_DELAY_MAX_MS = 5_000;
 const REQUIRED_CUSTOM_LINK_URL = "https://affiliate.shopee.vn/offer/custom_link";
 const CONFIG_STORAGE_KEY = "config";
 const DEFAULT_CONFIG = {
@@ -25,6 +27,8 @@ let mqttPingTimer;
 let mqttReconnectTimer;
 let mqttConnected = false;
 let pendingMqttPublishes = [];
+let mqttRequestQueue = [];
+let mqttQueueProcessing = false;
 let mqttStatus = {
   connected: false,
   brokerUrl: MQTT_BROKER_URL,
@@ -164,6 +168,53 @@ async function handleMqttMessage(topic, payload) {
       request: payload,
       error: error.message || "Generate that bai."
     };
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function getNextMqttQueueDelayMs() {
+  return Math.floor(
+    MQTT_QUEUE_DELAY_MIN_MS +
+      Math.random() * (MQTT_QUEUE_DELAY_MAX_MS - MQTT_QUEUE_DELAY_MIN_MS + 1)
+  );
+}
+
+function enqueueMqttRequest(message) {
+  mqttRequestQueue.push(message);
+  processMqttQueue();
+}
+
+async function processMqttQueue() {
+  if (mqttQueueProcessing) {
+    return;
+  }
+
+  mqttQueueProcessing = true;
+
+  try {
+    while (mqttRequestQueue.length > 0) {
+      const message = mqttRequestQueue.shift();
+      const response = await handleMqttMessage(message.topic, message.payload);
+
+      if (response) {
+        publishMqttResponse(response);
+      }
+
+      if (mqttRequestQueue.length > 0) {
+        await sleep(getNextMqttQueueDelayMs());
+      }
+    }
+  } finally {
+    mqttQueueProcessing = false;
+
+    if (mqttRequestQueue.length > 0) {
+      processMqttQueue();
+    }
   }
 }
 
@@ -364,10 +415,8 @@ async function handleIncomingPublish(bytes) {
     return;
   }
 
-  const response = await handleMqttMessage(message.topic, message.payload);
-
-  if (response) {
-    publishMqttResponse(response);
+  if (message.topic === MQTT_REQUEST_TOPIC) {
+    enqueueMqttRequest(message);
   }
 }
 

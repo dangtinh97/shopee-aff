@@ -101,8 +101,7 @@
       return;
     }
 
-    closeAffiliateModalLater();
-    pending.resolve(result);
+    pending.resolveAfterModal(result);
   }
 
   function rejectNextPending(error) {
@@ -182,17 +181,24 @@
     hookXhrOnce();
   }
 
-  function closeAffiliateModalLater() {
-    window.setTimeout(() => {
-      const closeButtons = [...document.querySelectorAll("button.ant-modal-close")];
-      const closeButton = closeButtons
-        .reverse()
-        .find((button) => button.offsetParent !== null);
+  function sleep(ms) {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
+  }
 
-      if (closeButton instanceof HTMLElement) {
-        closeButton.click();
-      }
-    }, CLOSE_MODAL_DELAY_MS);
+  async function closeAffiliateModal() {
+    await sleep(CLOSE_MODAL_DELAY_MS);
+
+    const closeButtons = [...document.querySelectorAll("button.ant-modal-close")];
+    const closeButton = closeButtons
+      .reverse()
+      .find((button) => button.offsetParent !== null);
+
+    if (closeButton instanceof HTMLElement) {
+      closeButton.click();
+      await sleep(300);
+    }
   }
 
   function getValueSetter(element) {
@@ -427,6 +433,16 @@
       }, timeoutMs);
 
       const pendingRequest = {
+        resolveAfterModal: (result) => {
+          if (settled) {
+            return;
+          }
+
+          cleanup();
+          closeAffiliateModal()
+            .then(() => resolve(result))
+            .catch(() => resolve(result));
+        },
         resolve: (result) => {
           if (settled) {
             return;
