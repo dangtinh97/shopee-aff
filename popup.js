@@ -32,8 +32,8 @@ function setResult(message, state = "") {
 
 function renderDevModeStatus(enabled) {
   modeStatusOutput.textContent = enabled
-    ? "Dev mode ON: requests are simulated."
-    : "Dev mode OFF: requests submit to Shopee.";
+    ? "Dev mode: ON"
+    : "Dev mode: OFF";
   modeStatusOutput.dataset.state = enabled ? "dev" : "live";
 }
 
@@ -41,31 +41,31 @@ function renderMqttStatus(status) {
   const connected = Boolean(status?.connected);
 
   if (status?.workerUnavailable) {
-    mqttStatusOutput.textContent = `MQTT worker unavailable: ${status.lastEvent}`;
+    mqttStatusOutput.textContent = `MQTT: worker unavailable (${status.lastEvent})`;
     mqttStatusOutput.dataset.state = "offline";
     return;
   }
 
   mqttStatusOutput.textContent = connected
-    ? `MQTT connected: ${status.brokerUrl}`
-    : `MQTT reconnecting: ${status?.lastEvent || "unknown"}`;
+    ? "MQTT: online"
+    : `MQTT: reconnecting (${status?.lastEvent || "unknown"})`;
   mqttStatusOutput.dataset.state = connected ? "connected" : "offline";
 }
 
 function renderLinkCheckStatus(enabled, status) {
   if (status?.ok === false) {
-    linkCheckStatusOutput.textContent = `Wrong tab. Sent topic: ${status.topic || "error_link"}. Check is OFF.`;
+    linkCheckStatusOutput.textContent = `Wrong tab. Sent ${status.topic || "error_link"}.`;
     linkCheckStatusOutput.dataset.state = "error";
     return;
   }
 
   if (enabled) {
-    linkCheckStatusOutput.textContent = "Link check ON: current tab is valid.";
+    linkCheckStatusOutput.textContent = "Check tab: valid";
     linkCheckStatusOutput.dataset.state = "enabled";
     return;
   }
 
-  linkCheckStatusOutput.textContent = "Link check OFF.";
+  linkCheckStatusOutput.textContent = "Check tab: OFF";
   linkCheckStatusOutput.dataset.state = "disabled";
 }
 
@@ -92,6 +92,7 @@ function renderAffiliateStats(stats) {
 
   failedLinks.forEach((failedLink) => {
     const item = document.createElement("div");
+    const copy = document.createElement("div");
     const url = document.createElement("div");
     const error = document.createElement("div");
     const actions = document.createElement("div");
@@ -99,6 +100,7 @@ function renderAffiliateStats(stats) {
     const removeButton = document.createElement("button");
 
     item.className = "failed-item";
+    copy.className = "failed-copy";
     url.className = "failed-url";
     url.textContent = failedLink.url || "(khong co url)";
     error.className = "failed-error";
@@ -118,7 +120,8 @@ function renderAffiliateStats(stats) {
     removeButton.dataset.id = failedLink.id;
 
     actions.append(retryButton, removeButton);
-    item.append(url, error, actions);
+    copy.append(url, error);
+    item.append(copy, actions);
     failedLinksOutput.appendChild(item);
   });
 }

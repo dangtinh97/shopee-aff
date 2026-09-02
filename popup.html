@@ -25,20 +25,51 @@
 
     body {
       margin: 0;
-      background: #ffffff;
-      color: #1f2933;
+      background: #f5f7fa;
+      color: #17212b;
       overflow: hidden;
     }
 
     .popup-shell {
-      width: 460px;
-      padding: 16px;
+      width: 420px;
+      max-height: 600px;
+      overflow: auto;
+      padding: 12px;
+      background: #f5f7fa;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: start;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.2;
+    }
+
+    .subtitle {
+      margin: 3px 0 0;
+      color: #627386;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .panel {
+      margin-bottom: 10px;
+      padding: 10px;
+      border: 1px solid #d9e1ea;
+      border-radius: 8px;
       background: #ffffff;
     }
 
     label {
       display: block;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
       font-size: 13px;
       font-weight: 600;
     }
@@ -46,7 +77,7 @@
     input,
     textarea {
       width: 100%;
-      padding: 10px;
+      padding: 9px 10px;
       border: 1px solid #c8d0d8;
       border-radius: 6px;
       font: inherit;
@@ -54,13 +85,13 @@
     }
 
     input {
-      height: 38px;
-      margin-bottom: 12px;
+      height: 36px;
+      margin-bottom: 10px;
     }
 
     textarea {
-      min-height: 96px;
-      margin-bottom: 12px;
+      min-height: 76px;
+      margin-bottom: 10px;
       resize: vertical;
     }
 
@@ -74,6 +105,7 @@
       color: #ffffff;
       cursor: pointer;
       font-weight: 700;
+      font-size: 13px;
     }
 
     button:disabled {
@@ -84,7 +116,7 @@
     .secondary-button {
       width: auto;
       margin-top: 0;
-      padding: 7px 10px;
+      padding: 6px 9px;
       border: 1px solid #c8d0d8;
       background: #ffffff;
       color: #1f2933;
@@ -92,12 +124,29 @@
       font-weight: 700;
     }
 
+    .danger-button {
+      border-color: #f4b8b2;
+      color: #b42318;
+    }
+
+    .settings-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
     .switch-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      margin: 4px 0 12px;
+      min-height: 40px;
+      margin: 0;
+      padding: 8px;
+      border: 1px solid #d9e1ea;
+      border-radius: 6px;
+      background: #f8fafc;
       font-size: 13px;
       font-weight: 600;
       cursor: pointer;
@@ -148,8 +197,8 @@
 
     output {
       display: block;
-      margin-top: 12px;
-      padding: 10px;
+      margin-top: 8px;
+      padding: 8px 10px;
       min-height: 18px;
       border-radius: 6px;
       background: #f4f6f8;
@@ -172,28 +221,29 @@
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 8px;
-      margin-bottom: 12px;
+      gap: 6px;
     }
 
     .stat-item {
-      padding: 10px;
+      min-width: 70px;
+      padding: 7px 8px;
       border: 1px solid #d9e0e7;
       border-radius: 6px;
-      background: #f8fafc;
+      background: #ffffff;
     }
 
     .stat-label {
       display: block;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
       color: #52616f;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
       text-transform: uppercase;
     }
 
     .stat-value {
-      font-size: 20px;
+      font-size: 18px;
+      line-height: 1;
       font-weight: 700;
     }
 
@@ -202,29 +252,40 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
-      margin-top: 12px;
       margin-bottom: 8px;
     }
 
     .failed-title {
       margin: 0;
       font-size: 13px;
+      line-height: 1.2;
     }
 
     .failed-list {
       display: grid;
-      gap: 8px;
-      max-height: 220px;
+      gap: 6px;
+      max-height: 180px;
       overflow: auto;
     }
 
     .failed-empty,
     .failed-item {
-      padding: 10px;
+      padding: 8px;
       border: 1px solid #d9e0e7;
       border-radius: 6px;
-      background: #ffffff;
+      background: #f8fafc;
       font-size: 12px;
+    }
+
+    .failed-item {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: start;
+    }
+
+    .failed-copy {
+      min-width: 0;
     }
 
     .failed-url,
@@ -234,20 +295,19 @@
     }
 
     .failed-error {
-      margin-top: 6px;
+      margin-top: 4px;
       color: #b42318;
     }
 
     .failed-actions {
       display: flex;
-      gap: 8px;
-      margin-top: 8px;
+      flex-direction: column;
+      gap: 6px;
     }
 
     #modeStatus,
     #linkCheckStatus {
       margin-top: 0;
-      margin-bottom: 12px;
       min-height: auto;
       font-weight: 700;
     }
@@ -273,8 +333,6 @@
     }
 
     #mqttStatus {
-      margin-top: 0;
-      margin-bottom: 12px;
       min-height: auto;
       font-size: 12px;
     }
@@ -292,43 +350,58 @@
 </head>
 <body>
 <main class="popup-shell">
-  <label for="url"><a href="https://affiliate.shopee.vn/offer/custom_link" target="_blank">Shopee URL</a></label>
-  <textarea id="url" placeholder="https://shopee.vn/..."></textarea>
-  <label for="subId1">Sub ID 1</label>
-  <input id="subId1" type="text" placeholder="SUB ID 1">
-  <label class="switch-row" for="testMode">
-    <input id="testMode" type="checkbox">
-    <span>Dev mode</span>
-    <span class="switch-track" aria-hidden="true"></span>
-  </label>
-  <output id="modeStatus" aria-live="polite"></output>
-  <label class="switch-row" for="linkCheckMode">
-    <input id="linkCheckMode" type="checkbox">
-    <span>Check current tab link</span>
-    <span class="switch-track" aria-hidden="true"></span>
-  </label>
-  <output id="linkCheckStatus" aria-live="polite"></output>
-  <output id="mqttStatus" aria-live="polite"></output>
-  <section class="stats-grid" aria-label="Affiliate stats">
-    <div class="stat-item">
-      <span class="stat-label">Created</span>
-      <span id="createdCount" class="stat-value">0</span>
+  <header class="topbar">
+    <div>
+      <h1 class="title">Shopee Affiliate</h1>
+      <p class="subtitle">Custom link worker</p>
     </div>
-    <div class="stat-item">
-      <span class="stat-label">Processing</span>
-      <span id="inProgressCount" class="stat-value">0</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-label">Failed</span>
-      <span id="failedCount" class="stat-value">0</span>
-    </div>
+    <section class="stats-grid" aria-label="Affiliate stats">
+      <div class="stat-item">
+        <span class="stat-label">Created</span>
+        <span id="createdCount" class="stat-value">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Busy</span>
+        <span id="inProgressCount" class="stat-value">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Failed</span>
+        <span id="failedCount" class="stat-value">0</span>
+      </div>
+    </section>
+  </header>
+
+  <section class="panel">
+    <label for="url"><a href="https://affiliate.shopee.vn/offer/custom_link" target="_blank">Shopee URL</a></label>
+    <textarea id="url" placeholder="https://shopee.vn/..."></textarea>
+    <label for="subId1">Sub ID 1</label>
+    <input id="subId1" type="text" placeholder="SUB ID 1">
+    <button id="run" type="button">Generate</button>
+    <output id="result" aria-live="polite"></output>
   </section>
-  <button id="run" type="button">Generate</button>
-  <output id="result" aria-live="polite"></output>
-  <section>
+
+  <section class="panel">
+    <div class="settings-grid">
+      <label class="switch-row" for="testMode">
+        <input id="testMode" type="checkbox">
+        <span>Dev mode</span>
+        <span class="switch-track" aria-hidden="true"></span>
+      </label>
+      <label class="switch-row" for="linkCheckMode">
+        <input id="linkCheckMode" type="checkbox">
+        <span>Check tab</span>
+        <span class="switch-track" aria-hidden="true"></span>
+      </label>
+    </div>
+    <output id="modeStatus" aria-live="polite"></output>
+    <output id="linkCheckStatus" aria-live="polite"></output>
+    <output id="mqttStatus" aria-live="polite"></output>
+  </section>
+
+  <section class="panel">
     <div class="failed-header">
-      <h2 class="failed-title">Link lỗi cần xử lý tay</h2>
-      <button id="clearFailedLinks" class="secondary-button" type="button">Clear</button>
+      <h2 class="failed-title">Link lỗi</h2>
+      <button id="clearFailedLinks" class="secondary-button danger-button" type="button">Clear</button>
     </div>
     <div id="failedLinks" class="failed-list"></div>
   </section>
