@@ -31,7 +31,7 @@
     }
 
     .popup-shell {
-      width: 380px;
+      width: 460px;
       padding: 16px;
       background: #ffffff;
     }
@@ -79,6 +79,17 @@
     button:disabled {
       cursor: wait;
       opacity: 0.7;
+    }
+
+    .secondary-button {
+      width: auto;
+      margin-top: 0;
+      padding: 7px 10px;
+      border: 1px solid #c8d0d8;
+      background: #ffffff;
+      color: #1f2933;
+      font-size: 12px;
+      font-weight: 700;
     }
 
     .switch-row {
@@ -158,6 +169,81 @@
       color: #17663a;
     }
 
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .stat-item {
+      padding: 10px;
+      border: 1px solid #d9e0e7;
+      border-radius: 6px;
+      background: #f8fafc;
+    }
+
+    .stat-label {
+      display: block;
+      margin-bottom: 4px;
+      color: #52616f;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .stat-value {
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .failed-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 12px;
+      margin-bottom: 8px;
+    }
+
+    .failed-title {
+      margin: 0;
+      font-size: 13px;
+    }
+
+    .failed-list {
+      display: grid;
+      gap: 8px;
+      max-height: 220px;
+      overflow: auto;
+    }
+
+    .failed-empty,
+    .failed-item {
+      padding: 10px;
+      border: 1px solid #d9e0e7;
+      border-radius: 6px;
+      background: #ffffff;
+      font-size: 12px;
+    }
+
+    .failed-url,
+    .failed-error {
+      overflow-wrap: anywhere;
+      line-height: 1.35;
+    }
+
+    .failed-error {
+      margin-top: 6px;
+      color: #b42318;
+    }
+
+    .failed-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
     #modeStatus,
     #linkCheckStatus {
       margin-top: 0;
@@ -223,8 +309,29 @@
   </label>
   <output id="linkCheckStatus" aria-live="polite"></output>
   <output id="mqttStatus" aria-live="polite"></output>
+  <section class="stats-grid" aria-label="Affiliate stats">
+    <div class="stat-item">
+      <span class="stat-label">Created</span>
+      <span id="createdCount" class="stat-value">0</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label">Processing</span>
+      <span id="inProgressCount" class="stat-value">0</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-label">Failed</span>
+      <span id="failedCount" class="stat-value">0</span>
+    </div>
+  </section>
   <button id="run" type="button">Generate</button>
   <output id="result" aria-live="polite"></output>
+  <section>
+    <div class="failed-header">
+      <h2 class="failed-title">Link lỗi cần xử lý tay</h2>
+      <button id="clearFailedLinks" class="secondary-button" type="button">Clear</button>
+    </div>
+    <div id="failedLinks" class="failed-list"></div>
+  </section>
 </main>
   <script src="popup.js"></script>
 </body>

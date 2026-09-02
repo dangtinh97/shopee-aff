@@ -12,8 +12,14 @@ const MQTT_HEARTBEAT_PERIOD_MINUTES = 1;
 const LINK_CHECK_ALARM = "link-check";
 const LINK_CHECK_PERIOD_MINUTES = 0.5;
 const LINK_CHECK_STATUS_STORAGE_KEY = "linkCheckStatus";
+const AFFILIATE_STATS_STORAGE_KEY = "affiliateStats";
+const FAILED_LINKS_STORAGE_KEY = "failedLinks";
 const MQTT_QUEUE_DELAY_MIN_MS = 3_000;
 const MQTT_QUEUE_DELAY_MAX_MS = 5_000;
+const AFFILIATE_RELOAD_ALARM = "affiliate-hourly-reload";
+const AFFILIATE_RELOAD_CHECK_PERIOD_MINUTES = 1;
+const AFFILIATE_RELOAD_INTERVAL_MS = 60 * 60 * 1000;
+const MAX_FAILED_LINKS = 100;
 const REQUIRED_CUSTOM_LINK_URL = "https://affiliate.shopee.vn/offer/custom_link";
 const CONFIG_STORAGE_KEY = "config";
 const DEFAULT_CONFIG = {
@@ -29,10 +35,25 @@ let mqttConnected = false;
 let pendingMqttPublishes = [];
 let mqttRequestQueue = [];
 let mqttQueueProcessing = false;
+let activeGenerateCount = 0;
+let reloadInProgress = false;
 let mqttStatus = {
   connected: false,
   brokerUrl: MQTT_BROKER_URL,
   lastEvent: "init",
+  updatedAt: Date.now()
+};
+const DEFAULT_AFFILIATE_STATS = {
+  createdCount: 0,
+  receivedCount: 0,
+  failedCount: 0,
+  inProgressCount: 0,
+  lastCreatedAt: undefined,
+  lastFailedAt: undefined,
+  lastReceivedAt: undefined,
+  lastReloadAt: undefined,
+  reloadWaiting: false,
+  reloadWaitReason: "",
   updatedAt: Date.now()
 };
 
@@ -102,14 +123,99 @@ async function setConfig(configPatch) {
   });
 }
 
+async function getAffiliateStats() {
+  const values = await chrome.storage.local.get({
+    [AFFILIATE_STATS_STORAGE_KEY]: DEFAULT_AFFILIATE_STATS
+  });
+
+  return {
+    ...DEFAULT_AFFILIATE_STATS,
+    ...(values[AFFILIATE_STATS_STORAGE_KEY] || {})
+  };
+}
+
+async function updateAffiliateStats(updater) {
+  const currentStats = await getAffiliateStats();
+  const statsPatch = typeof updater === "function"
+    ? updater(currentStats)
+    : updater;
+  const nextStats = {
+    ...currentStats,
+    ...statsPatch,
+    updatedAt: Date.now()
+  };
+
+  await chrome.storage.local.set({
+    [AFFILIATE_STATS_STORAGE_KEY]: nextStats
+  });
+
+  return nextStats;
+}
+
+async function setInProgressCount() {
+  await updateAffiliateStats({
+    inProgressCount: activeGenerateCount + mqttRequestQueue.length
+  });
+}
+
+function getRequestUrlFromPayload(payload) {
+  return payload?.url ? String(payload.url) : "";
+}
+
+async function saveFailedLink(failure) {
+  const values = await chrome.storage.local.get({
+    [FAILED_LINKS_STORAGE_KEY]: []
+  });
+  const failedLinks = Array.isArray(values[FAILED_LINKS_STORAGE_KEY])
+    ? values[FAILED_LINKS_STORAGE_KEY]
+    : [];
+  const now = Date.now();
+  const nextFailedLinks = [
+    {
+      id: `${now}-${crypto.randomUUID()}`,
+      url: getRequestUrlFromPayload(failure.request) || failure.url || "",
+      subId1: failure.request?.subid || failure.request?.subId1 || "",
+      request: failure.request,
+      requestTopic: failure.requestTopic,
+      error: failure.error || "Generate that bai.",
+      createdAt: now
+    },
+    ...failedLinks
+  ].slice(0, MAX_FAILED_LINKS);
+
+  await chrome.storage.local.set({
+    [FAILED_LINKS_STORAGE_KEY]: nextFailedLinks
+  });
+
+  await updateAffiliateStats((stats) => ({
+    failedCount: Number(stats.failedCount || 0) + 1,
+    lastFailedAt: now
+  }));
+}
+
 async function generateFromMqttPayload(payload) {
   const tab = await findAffiliateTab();
   const params = normalizeMqttPayload(payload);
-  const response = await sendGenerateMessageToTab(tab.id, params);
+  activeGenerateCount += 1;
+  await setInProgressCount();
+
+  let response;
+
+  try {
+    response = await sendGenerateMessageToTab(tab.id, params);
+  } finally {
+    activeGenerateCount = Math.max(activeGenerateCount - 1, 0);
+    await setInProgressCount();
+  }
 
   if (response?.error) {
     throw new Error(response.error);
   }
+
+  await updateAffiliateStats((stats) => ({
+    createdCount: Number(stats.createdCount || 0) + 1,
+    lastCreatedAt: Date.now()
+  }));
 
   return response;
 }
@@ -162,11 +268,26 @@ async function handleMqttMessage(topic, payload) {
       response: result
     };
   } catch (error) {
+    const errorMessage = error.message || "Generate that bai.";
+
+    await saveFailedLink({
+      request: payload,
+      requestTopic: topic,
+      error: errorMessage
+    });
+    publishErrorLink({
+      topic: MQTT_ERROR_LINK_TOPIC,
+      requestTopic: topic,
+      request: payload,
+      error: errorMessage,
+      checkedAt: Date.now()
+    });
+
     return {
       topic: MQTT_RESPONSE_TOPIC,
       requestTopic: topic,
       request: payload,
-      error: error.message || "Generate that bai."
+      error: errorMessage
     };
   }
 }
@@ -186,6 +307,11 @@ function getNextMqttQueueDelayMs() {
 
 function enqueueMqttRequest(message) {
   mqttRequestQueue.push(message);
+  updateAffiliateStats((stats) => ({
+    receivedCount: Number(stats.receivedCount || 0) + 1,
+    lastReceivedAt: Date.now()
+  }));
+  setInProgressCount();
   processMqttQueue();
 }
 
@@ -199,6 +325,7 @@ async function processMqttQueue() {
   try {
     while (mqttRequestQueue.length > 0) {
       const message = mqttRequestQueue.shift();
+      await setInProgressCount();
       const response = await handleMqttMessage(message.topic, message.payload);
 
       if (response) {
@@ -211,6 +338,7 @@ async function processMqttQueue() {
     }
   } finally {
     mqttQueueProcessing = false;
+    await setInProgressCount();
 
     if (mqttRequestQueue.length > 0) {
       processMqttQueue();
@@ -338,14 +466,34 @@ function sendMqttPacket(packet) {
   }
 }
 
-function publishMqttResponse(response) {
-  publishMqttTopic(MQTT_RESPONSE_TOPIC, response);
+function publishMqttResponse(response, options = {}) {
+  const sent = publishMqttTopic(MQTT_RESPONSE_TOPIC, response);
+
+  if (
+    sent ||
+    options.trackSendFailure === false ||
+    response?.error ||
+    !response?.request?.url
+  ) {
+    return;
+  }
+
+  const errorPayload = {
+    topic: MQTT_ERROR_LINK_TOPIC,
+    requestTopic: response.requestTopic || MQTT_REQUEST_TOPIC,
+    request: response.request,
+    error: "Da tao link nhung chua gui duoc MQTT response.",
+    checkedAt: Date.now()
+  };
+
+  saveFailedLink(errorPayload);
+  publishErrorLink(errorPayload);
 }
 
 function publishMqttTopic(topic, payload) {
   if (isMqttSocketOpen()) {
     sendMqttPacket(buildPublishPacket(topic, payload));
-    return;
+    return true;
   }
 
   pendingMqttPublishes.push({
@@ -353,6 +501,7 @@ function publishMqttTopic(topic, payload) {
     payload
   });
   ensureMqttConnected();
+  return false;
 }
 
 function publishErrorLink(payload) {
@@ -360,6 +509,8 @@ function publishErrorLink(payload) {
   publishMqttResponse({
     ...payload,
     topic: MQTT_ERROR_LINK_TOPIC
+  }, {
+    trackSendFailure: false
   });
 }
 
@@ -515,6 +666,12 @@ function setupLinkCheckAlarm() {
   });
 }
 
+function setupAffiliateReloadAlarm() {
+  chrome.alarms.create(AFFILIATE_RELOAD_ALARM, {
+    periodInMinutes: AFFILIATE_RELOAD_CHECK_PERIOD_MINUTES
+  });
+}
+
 async function getCurrentTab() {
   const [tab] = await chrome.tabs.query({
     active: true,
@@ -593,22 +750,100 @@ async function checkCurrentTabLink(tabSnapshot) {
   };
 
   publishErrorLink(result);
+  await saveFailedLink({
+    url: currentUrl,
+    requestTopic: MQTT_ERROR_LINK_TOPIC,
+    error: "Tab affiliate dang sai link."
+  });
   await disableLinkCheck();
   await setLinkCheckStatus(result);
 
   return result;
 }
 
+async function getAffiliateProcessingStatus() {
+  const stats = await getAffiliateStats();
+  const inProgressCount = activeGenerateCount + mqttRequestQueue.length;
+
+  return {
+    inProgressCount,
+    mqttQueueProcessing,
+    queueLength: mqttRequestQueue.length,
+    activeGenerateCount,
+    lastReloadAt: stats.lastReloadAt
+  };
+}
+
+async function reloadAffiliateTabIfIdle(force = false) {
+  if (reloadInProgress) {
+    return;
+  }
+
+  const stats = await getAffiliateStats();
+  const now = Date.now();
+
+  if (!force && !stats.lastReloadAt) {
+    await updateAffiliateStats({
+      lastReloadAt: now
+    });
+    return;
+  }
+
+  if (
+    !force &&
+    stats.lastReloadAt &&
+    now - stats.lastReloadAt < AFFILIATE_RELOAD_INTERVAL_MS
+  ) {
+    return;
+  }
+
+  const processingStatus = await getAffiliateProcessingStatus();
+
+  if (processingStatus.inProgressCount > 0 || processingStatus.mqttQueueProcessing) {
+    await updateAffiliateStats({
+      inProgressCount: processingStatus.inProgressCount,
+      reloadWaiting: true,
+      reloadWaitReason: "Dang xu ly link, doi xong moi reload."
+    });
+    return;
+  }
+
+  reloadInProgress = true;
+
+  try {
+    const tab = await findAffiliateTab();
+
+    await chrome.tabs.reload(tab.id);
+    await updateAffiliateStats({
+      lastReloadAt: now,
+      reloadWaiting: false,
+      reloadWaitReason: "",
+      inProgressCount: 0
+    });
+  } catch (error) {
+    await updateAffiliateStats({
+      reloadWaiting: false,
+      reloadWaitReason: error.message || "Khong reload duoc tab affiliate."
+    });
+  } finally {
+    reloadInProgress = false;
+  }
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   setupMqttHeartbeat();
   setupLinkCheckAlarm();
+  setupAffiliateReloadAlarm();
   ensureMqttConnected();
+  setInProgressCount();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   setupMqttHeartbeat();
   setupLinkCheckAlarm();
+  setupAffiliateReloadAlarm();
   ensureMqttConnected();
+  setInProgressCount();
 });
 
 chrome.runtime.onSuspend.addListener(() => {
@@ -635,6 +870,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         checkedAt: Date.now()
       });
     });
+    return;
+  }
+
+  if (alarm.name === AFFILIATE_RELOAD_ALARM) {
+    reloadAffiliateTabIfIdle();
   }
 });
 
@@ -648,6 +888,146 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse(mqttStatus);
 
     return false;
+  }
+
+  if (message.type === "GET_AFFILIATE_STATS") {
+    Promise.all([
+      getAffiliateStats(),
+      chrome.storage.local.get({
+        [FAILED_LINKS_STORAGE_KEY]: []
+      }),
+      getAffiliateProcessingStatus()
+    ])
+      .then(([stats, values, processingStatus]) => {
+        sendResponse({
+          ...stats,
+          ...processingStatus,
+          failedLinks: values[FAILED_LINKS_STORAGE_KEY] || []
+        });
+      })
+      .catch((error) => sendResponse({
+        error: error.message || "Khong doc duoc thong ke."
+      }));
+
+    return true;
+  }
+
+  if (message.type === "RECORD_GENERATE_RESULT") {
+    const payload = message.payload || {};
+
+    if (payload.ok) {
+      updateAffiliateStats((stats) => ({
+        createdCount: Number(stats.createdCount || 0) + 1,
+        lastCreatedAt: Date.now()
+      }))
+        .then(() => sendResponse({
+          ok: true
+        }))
+        .catch((error) => sendResponse({
+          error: error.message || "Khong luu duoc thong ke."
+        }));
+      return true;
+    }
+
+    saveFailedLink({
+      url: payload.url,
+      request: {
+        url: payload.url,
+        subId1: payload.subId1
+      },
+      requestTopic: "manual",
+      error: payload.error || "Generate that bai."
+    })
+      .then(() => sendResponse({
+        ok: true
+      }))
+      .catch((error) => sendResponse({
+        error: error.message || "Khong luu duoc link loi."
+      }));
+
+    return true;
+  }
+
+  if (message.type === "SET_MANUAL_PROCESSING") {
+    activeGenerateCount = message.payload?.active
+      ? activeGenerateCount + 1
+      : Math.max(activeGenerateCount - 1, 0);
+    setInProgressCount()
+      .then(() => sendResponse({
+        ok: true
+      }))
+      .catch((error) => sendResponse({
+        error: error.message || "Khong cap nhat duoc trang thai xu ly."
+      }));
+
+    return true;
+  }
+
+  if (message.type === "REMOVE_FAILED_LINK") {
+    const failedLinkId = message.payload?.id;
+
+    chrome.storage.local.get({
+      [FAILED_LINKS_STORAGE_KEY]: []
+    })
+      .then((values) => {
+        const failedLinks = Array.isArray(values[FAILED_LINKS_STORAGE_KEY])
+          ? values[FAILED_LINKS_STORAGE_KEY]
+          : [];
+
+        return chrome.storage.local.set({
+          [FAILED_LINKS_STORAGE_KEY]: failedLinks.filter((link) => link.id !== failedLinkId)
+        });
+      })
+      .then(() => sendResponse({
+        ok: true
+      }))
+      .catch((error) => sendResponse({
+        error: error.message || "Khong xoa duoc link loi."
+      }));
+
+    return true;
+  }
+
+  if (message.type === "CLEAR_FAILED_LINKS") {
+    chrome.storage.local.set({
+      [FAILED_LINKS_STORAGE_KEY]: []
+    })
+      .then(() => sendResponse({
+        ok: true
+      }))
+      .catch((error) => sendResponse({
+        error: error.message || "Khong xoa duoc danh sach link loi."
+      }));
+
+    return true;
+  }
+
+  if (message.type === "RETRY_FAILED_LINK") {
+    const failedLink = message.payload?.failedLink;
+
+    generateFromMqttPayload({
+      url: failedLink?.url,
+      subid: failedLink?.subId1
+    })
+      .then((result) => sendResponse({
+        ok: true,
+        response: result
+      }))
+      .catch(async (error) => {
+        await saveFailedLink({
+          request: {
+            url: failedLink?.url,
+            subid: failedLink?.subId1
+          },
+          requestTopic: MQTT_REQUEST_TOPIC,
+          error: error.message || "Retry that bai."
+        });
+        sendResponse({
+          error: error.message || "Retry that bai."
+        });
+      });
+
+    return true;
   }
 
   if (message.type === "CHECK_CURRENT_TAB_LINK_NOW") {
@@ -667,4 +1047,5 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 setupMqttHeartbeat();
 setupLinkCheckAlarm();
+setupAffiliateReloadAlarm();
 ensureMqttConnected();

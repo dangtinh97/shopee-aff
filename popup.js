@@ -3,6 +3,8 @@
 const DEFAULT_TIMEOUT_MS = 10_000;
 const CONFIG_STORAGE_KEY = "config";
 const LINK_CHECK_STATUS_STORAGE_KEY = "linkCheckStatus";
+const AFFILIATE_STATS_STORAGE_KEY = "affiliateStats";
+const FAILED_LINKS_STORAGE_KEY = "failedLinks";
 const DEFAULT_CONFIG = {
   devMode: true,
   linkCheckEnabled: false
@@ -16,6 +18,11 @@ const runButton = document.getElementById("run");
 const modeStatusOutput = document.getElementById("modeStatus");
 const linkCheckStatusOutput = document.getElementById("linkCheckStatus");
 const mqttStatusOutput = document.getElementById("mqttStatus");
+const createdCountOutput = document.getElementById("createdCount");
+const inProgressCountOutput = document.getElementById("inProgressCount");
+const failedCountOutput = document.getElementById("failedCount");
+const failedLinksOutput = document.getElementById("failedLinks");
+const clearFailedLinksButton = document.getElementById("clearFailedLinks");
 const resultOutput = document.getElementById("result");
 
 function setResult(message, state = "") {
@@ -62,6 +69,60 @@ function renderLinkCheckStatus(enabled, status) {
   linkCheckStatusOutput.dataset.state = "disabled";
 }
 
+function renderAffiliateStats(stats) {
+  createdCountOutput.textContent = String(stats?.createdCount || 0);
+  inProgressCountOutput.textContent = String(stats?.inProgressCount || 0);
+  failedCountOutput.textContent = String(stats?.failedCount || 0);
+
+  const failedLinks = Array.isArray(stats?.failedLinks)
+    ? stats.failedLinks
+    : [];
+
+  clearFailedLinksButton.disabled = failedLinks.length === 0;
+  failedLinksOutput.textContent = "";
+
+  if (failedLinks.length === 0) {
+    const empty = document.createElement("div");
+
+    empty.className = "failed-empty";
+    empty.textContent = "Chua co link loi.";
+    failedLinksOutput.appendChild(empty);
+    return;
+  }
+
+  failedLinks.forEach((failedLink) => {
+    const item = document.createElement("div");
+    const url = document.createElement("div");
+    const error = document.createElement("div");
+    const actions = document.createElement("div");
+    const retryButton = document.createElement("button");
+    const removeButton = document.createElement("button");
+
+    item.className = "failed-item";
+    url.className = "failed-url";
+    url.textContent = failedLink.url || "(khong co url)";
+    error.className = "failed-error";
+    error.textContent = failedLink.error || "Generate that bai.";
+    actions.className = "failed-actions";
+
+    retryButton.className = "secondary-button";
+    retryButton.type = "button";
+    retryButton.textContent = "Retry";
+    retryButton.dataset.action = "retry";
+    retryButton.dataset.id = failedLink.id;
+
+    removeButton.className = "secondary-button";
+    removeButton.type = "button";
+    removeButton.textContent = "Xoa";
+    removeButton.dataset.action = "remove";
+    removeButton.dataset.id = failedLink.id;
+
+    actions.append(retryButton, removeButton);
+    item.append(url, error, actions);
+    failedLinksOutput.appendChild(item);
+  });
+}
+
 async function refreshMqttStatus() {
   try {
     const status = await chrome.runtime.sendMessage({
@@ -92,6 +153,57 @@ async function refreshLinkCheckStatus() {
   const status = values[LINK_CHECK_STATUS_STORAGE_KEY];
 
   renderLinkCheckStatus(await getLinkCheckMode(), status);
+}
+
+async function refreshAffiliateStats() {
+  try {
+    const stats = await chrome.runtime.sendMessage({
+      source: "shopee-affiliate-extension-popup",
+      type: "GET_AFFILIATE_STATS"
+    });
+
+    if (stats?.error) {
+      throw new Error(stats.error);
+    }
+
+    renderAffiliateStats(stats);
+  } catch (_error) {
+    const values = await chrome.storage.local.get({
+      [AFFILIATE_STATS_STORAGE_KEY]: {},
+      [FAILED_LINKS_STORAGE_KEY]: []
+    });
+
+    renderAffiliateStats({
+      ...(values[AFFILIATE_STATS_STORAGE_KEY] || {}),
+      failedLinks: values[FAILED_LINKS_STORAGE_KEY] || []
+    });
+  }
+}
+
+async function recordGenerateResult(payload) {
+  try {
+    await chrome.runtime.sendMessage({
+      source: "shopee-affiliate-extension-popup",
+      type: "RECORD_GENERATE_RESULT",
+      payload
+    });
+  } catch (_error) {
+    // The popup can still show the result even if the service worker is waking up.
+  }
+}
+
+async function setManualProcessing(active) {
+  try {
+    await chrome.runtime.sendMessage({
+      source: "shopee-affiliate-extension-popup",
+      type: "SET_MANUAL_PROCESSING",
+      payload: {
+        active
+      }
+    });
+  } catch (_error) {
+    // Reload protection is best-effort when the service worker is starting.
+  }
 }
 
 function assertShopeeUrl(url) {
@@ -261,9 +373,51 @@ async function generateFromActiveTab(url, subId1) {
   return response;
 }
 
+async function getFailedLinkById(id) {
+  const values = await chrome.storage.local.get({
+    [FAILED_LINKS_STORAGE_KEY]: []
+  });
+  const failedLinks = Array.isArray(values[FAILED_LINKS_STORAGE_KEY])
+    ? values[FAILED_LINKS_STORAGE_KEY]
+    : [];
+
+  return failedLinks.find((failedLink) => failedLink.id === id);
+}
+
+async function removeFailedLink(id) {
+  const response = await chrome.runtime.sendMessage({
+    source: "shopee-affiliate-extension-popup",
+    type: "REMOVE_FAILED_LINK",
+    payload: {
+      id
+    }
+  });
+
+  if (response?.error) {
+    throw new Error(response.error);
+  }
+}
+
+async function retryFailedLink(failedLink) {
+  const response = await chrome.runtime.sendMessage({
+    source: "shopee-affiliate-extension-popup",
+    type: "RETRY_FAILED_LINK",
+    payload: {
+      failedLink
+    }
+  });
+
+  if (response?.error) {
+    throw new Error(response.error);
+  }
+
+  return response.response;
+}
+
 runButton.addEventListener("click", async () => {
   const originalUrl = urlInput.value.trim();
   const subId1 = subId1Input.value.trim();
+  let manualProcessingStarted = false;
 
   runButton.disabled = true;
   setResult("Dang tao affiliate link...");
@@ -271,6 +425,8 @@ runButton.addEventListener("click", async () => {
   try {
     assertShopeeUrl(originalUrl);
 
+    await setManualProcessing(true);
+    manualProcessingStarted = true;
     const result = await generateFromActiveTab(originalUrl, subId1);
 
     if (result?.submitted === false) {
@@ -294,10 +450,99 @@ runButton.addEventListener("click", async () => {
       ].join("\n"),
       "success"
     );
+    await recordGenerateResult({
+      ok: true,
+      url: originalUrl,
+      subId1
+    });
+    await refreshAffiliateStats();
   } catch (error) {
     setResult(error.message || "Generate that bai.", "error");
+    if (originalUrl) {
+      await recordGenerateResult({
+        ok: false,
+        url: originalUrl,
+        subId1,
+        error: error.message || "Generate that bai."
+      });
+      await refreshAffiliateStats();
+    }
   } finally {
+    if (manualProcessingStarted) {
+      await setManualProcessing(false);
+    }
     runButton.disabled = false;
+  }
+});
+
+failedLinksOutput.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-action]");
+
+  if (!button) {
+    return;
+  }
+
+  const action = button.dataset.action;
+  const id = button.dataset.id;
+
+  button.disabled = true;
+
+  try {
+    if (action === "remove") {
+      await removeFailedLink(id);
+      setResult("Da xoa link loi.", "success");
+      await refreshAffiliateStats();
+      return;
+    }
+
+    const failedLink = await getFailedLinkById(id);
+
+    if (!failedLink) {
+      throw new Error("Khong tim thay link loi.");
+    }
+
+    setResult("Dang retry link loi...");
+
+    const result = await retryFailedLink(failedLink);
+
+    await removeFailedLink(id);
+    setResult(
+      [
+        "Retry thanh cong.",
+        `shortLink: ${result.shortLink}`,
+        `longLink: ${result.longLink}`,
+        `failCode: ${result.failCode}`
+      ].join("\n"),
+      "success"
+    );
+    await refreshAffiliateStats();
+  } catch (error) {
+    setResult(error.message || "Xu ly link loi that bai.", "error");
+    await refreshAffiliateStats();
+  } finally {
+    button.disabled = false;
+  }
+});
+
+clearFailedLinksButton.addEventListener("click", async () => {
+  clearFailedLinksButton.disabled = true;
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      source: "shopee-affiliate-extension-popup",
+      type: "CLEAR_FAILED_LINKS"
+    });
+
+    if (response?.error) {
+      throw new Error(response.error);
+    }
+
+    setResult("Da xoa danh sach link loi.", "success");
+    await refreshAffiliateStats();
+  } catch (error) {
+    setResult(error.message || "Khong xoa duoc danh sach link loi.", "error");
+  } finally {
+    clearFailedLinksButton.disabled = false;
   }
 });
 
@@ -318,9 +563,14 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes[CONFIG_STORAGE_KEY] || changes[LINK_CHECK_STATUS_STORAGE_KEY]) {
     refreshLinkCheckStatus();
   }
+
+  if (changes[AFFILIATE_STATS_STORAGE_KEY] || changes[FAILED_LINKS_STORAGE_KEY]) {
+    refreshAffiliateStats();
+  }
 });
 
 initTestModeSwitch();
 initLinkCheckSwitch();
 refreshMqttStatus();
 refreshLinkCheckStatus();
+refreshAffiliateStats();
