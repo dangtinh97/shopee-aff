@@ -37,6 +37,7 @@ let mqttRequestQueue = [];
 let mqttQueueProcessing = false;
 let activeGenerateCount = 0;
 let reloadInProgress = false;
+let statsUpdatePromise = Promise.resolve();
 let mqttStatus = {
   connected: false,
   brokerUrl: MQTT_BROKER_URL,
@@ -135,21 +136,27 @@ async function getAffiliateStats() {
 }
 
 async function updateAffiliateStats(updater) {
-  const currentStats = await getAffiliateStats();
-  const statsPatch = typeof updater === "function"
-    ? updater(currentStats)
-    : updater;
-  const nextStats = {
-    ...currentStats,
-    ...statsPatch,
-    updatedAt: Date.now()
-  };
+  const nextUpdate = statsUpdatePromise.then(async () => {
+    const currentStats = await getAffiliateStats();
+    const statsPatch = typeof updater === "function"
+      ? updater(currentStats)
+      : updater;
+    const nextStats = {
+      ...currentStats,
+      ...statsPatch,
+      updatedAt: Date.now()
+    };
 
-  await chrome.storage.local.set({
-    [AFFILIATE_STATS_STORAGE_KEY]: nextStats
+    await chrome.storage.local.set({
+      [AFFILIATE_STATS_STORAGE_KEY]: nextStats
+    });
+
+    return nextStats;
   });
 
-  return nextStats;
+  statsUpdatePromise = nextUpdate.catch(() => undefined);
+
+  return nextUpdate;
 }
 
 async function setInProgressCount() {

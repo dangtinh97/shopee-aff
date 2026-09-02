@@ -439,6 +439,12 @@ runButton.addEventListener("click", async () => {
         ].join("\n"),
         "success"
       );
+      await recordGenerateResult({
+        ok: true,
+        url: originalUrl,
+        subId1
+      });
+      await refreshAffiliateStats();
       return;
     }
 
