@@ -3,7 +3,7 @@
 
   const EXTENSION_SOURCE = "shopee-affiliate-extension";
   const PAGE_SOURCE = "shopee-affiliate-page";
-  const DEFAULT_TIMEOUT_MS = 10_000;
+  const DEFAULT_TIMEOUT_MS = 15_000;
   const CLOSE_MODAL_DELAY_MS = 1_000;
   const MOCK_AFFILIATE_RESULT = {
     shortLink: "https://s.shopee.vn/2g9WR7chzl",
