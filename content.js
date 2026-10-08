@@ -2,7 +2,7 @@
 
 const EXTENSION_SOURCE = "shopee-affiliate-extension";
 const PAGE_SOURCE = "shopee-affiliate-page";
-const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_TIMEOUT_MS = 20_000;
 
 let injectPromise;
 
@@ -50,6 +50,9 @@ async function generateAffiliateLink(params, timeoutMs = DEFAULT_TIMEOUT_MS) {
   await injectPageScript();
 
   const requestId = createRequestId();
+  const contentTimeoutMs = Math.max(timeoutMs, DEFAULT_TIMEOUT_MS);
+  // De injected.js luon timeout truoc content.js it nhat 4s, tranh race condition
+  const injectedTimeoutMs = Math.max(contentTimeoutMs - 4_000, 12_000);
 
   return new Promise((resolve, reject) => {
     let timeoutId;
@@ -88,7 +91,7 @@ async function generateAffiliateLink(params, timeoutMs = DEFAULT_TIMEOUT_MS) {
     timeoutId = setTimeout(() => {
       cleanup();
       reject(new Error("Timeout khi cho Shopee Affiliate response."));
-    }, timeoutMs);
+    }, contentTimeoutMs);
 
     window.postMessage({
       source: EXTENSION_SOURCE,
@@ -98,7 +101,7 @@ async function generateAffiliateLink(params, timeoutMs = DEFAULT_TIMEOUT_MS) {
         url: params.url,
         subId1: params.subId1 || "",
         testMode: Boolean(params.testMode),
-        timeoutMs
+        timeoutMs: injectedTimeoutMs
       }
     }, window.location.origin);
   });
@@ -109,9 +112,40 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     ![
       "shopee-affiliate-extension-popup",
       "shopee-affiliate-extension-background"
-    ].includes(message?.source) ||
-    message.type !== "GENERATE_AFFILIATE_LINK"
+    ].includes(message?.source)
   ) {
+    return false;
+  }
+
+  if (message.type === "PING_READINESS") {
+    const isLogin =
+      window.location.href.includes("/buyer/login") ||
+      window.location.href.includes("/login") ||
+      window.location.href.includes("accounts.shopee.vn");
+    const ready = Boolean(document.querySelector("#customLink_original_url"));
+
+    sendResponse({
+      ok: true,
+      ready,
+      isLogin,
+      url: window.location.href
+    });
+    return false;
+  }
+
+  if (message.type !== "GENERATE_AFFILIATE_LINK") {
+    return false;
+  }
+
+  const isLogin =
+    window.location.href.includes("/buyer/login") ||
+    window.location.href.includes("/login") ||
+    window.location.href.includes("accounts.shopee.vn");
+
+  if (isLogin) {
+    sendResponse({
+      error: "SESSION_EXPIRED: Phien dang nhap Shopee da het han. Vui long dang nhap lai."
+    });
     return false;
   }
 

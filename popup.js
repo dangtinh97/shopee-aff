@@ -1,6 +1,6 @@
 "use strict";
 
-const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_TIMEOUT_MS = 20_000;
 const CONFIG_STORAGE_KEY = "config";
 const LINK_CHECK_STATUS_STORAGE_KEY = "linkCheckStatus";
 const AFFILIATE_STATS_STORAGE_KEY = "affiliateStats";
@@ -18,6 +18,7 @@ const runButton = document.getElementById("run");
 const modeStatusOutput = document.getElementById("modeStatus");
 const linkCheckStatusOutput = document.getElementById("linkCheckStatus");
 const mqttStatusOutput = document.getElementById("mqttStatus");
+const sessionStatusOutput = document.getElementById("sessionStatus");
 const createdCountOutput = document.getElementById("createdCount");
 const inProgressCountOutput = document.getElementById("inProgressCount");
 const failedCountOutput = document.getElementById("failedCount");
@@ -52,7 +53,34 @@ function renderMqttStatus(status) {
   mqttStatusOutput.dataset.state = connected ? "connected" : "offline";
 }
 
+function renderSessionStatus(stats) {
+  if (!sessionStatusOutput) {
+    return;
+  }
+
+  if (stats?.sessionExpired) {
+    sessionStatusOutput.textContent = "⚠️ Hết hạn đăng nhập! Vui lòng mở tab Shopee đăng nhập lại.";
+    sessionStatusOutput.dataset.state = "expired";
+    return;
+  }
+
+  if (stats?.reloadWaiting) {
+    sessionStatusOutput.textContent = `🔄 ${stats.reloadWaitReason || "Tab đang reload, vui lòng chờ..."}`;
+    sessionStatusOutput.dataset.state = "reloading";
+    return;
+  }
+
+  sessionStatusOutput.textContent = "";
+  sessionStatusOutput.dataset.state = "";
+}
+
 function renderLinkCheckStatus(enabled, status) {
+  if (status?.sessionExpired) {
+    linkCheckStatusOutput.textContent = "Session expired! Cần đăng nhập lại.";
+    linkCheckStatusOutput.dataset.state = "error";
+    return;
+  }
+
   if (status?.ok === false) {
     linkCheckStatusOutput.textContent = `Wrong tab. Sent ${status.topic || "error_link"}.`;
     linkCheckStatusOutput.dataset.state = "error";
@@ -70,6 +98,7 @@ function renderLinkCheckStatus(enabled, status) {
 }
 
 function renderAffiliateStats(stats) {
+  renderSessionStatus(stats);
   createdCountOutput.textContent = String(stats?.createdCount || 0);
   inProgressCountOutput.textContent = String(stats?.inProgressCount || 0);
   failedCountOutput.textContent = String(stats?.failedCount || 0);
@@ -222,20 +251,36 @@ function assertShopeeUrl(url) {
 }
 
 async function getActiveTab() {
-  const [tab] = await chrome.tabs.query({
-    active: true,
-    currentWindow: true
-  });
+  const allTabs = await chrome.tabs.query({});
 
-  if (!tab?.id) {
-    throw new Error("Khong tim thay tab hien tai.");
+  // 1. Uu tien active tab neu dung link
+  const activeTab = allTabs.find((t) => t.active && t.url?.startsWith("https://affiliate.shopee.vn/offer/custom_link"));
+  if (activeTab?.id) {
+    return activeTab;
   }
 
-  if (!tab.url?.startsWith("https://affiliate.shopee.vn/offer/custom_link")) {
-    throw new Error("Hay mo trang https://affiliate.shopee.vn/offer/custom_link truoc khi generate.");
+  // 2. Tim bat ky tab nao trong Chrome dang mo custom_link
+  const validTab = allTabs.find((t) => t.id && t.url?.startsWith("https://affiliate.shopee.vn/offer/custom_link"));
+  if (validTab?.id) {
+    return validTab;
   }
 
-  return tab;
+  // 3. Kiem tra xem co tab Shopee nao bi vang ra trang login khong
+  const loginTab = allTabs.find((t) =>
+    t.id && t.url && (
+      t.url.includes("/buyer/login") ||
+      t.url.includes("/login") ||
+      t.url.includes("accounts.shopee.vn")
+    ) && (
+      t.url.includes("shopee.vn") || t.url.includes("shopee")
+    )
+  );
+
+  if (loginTab) {
+    throw new Error("SESSION_EXPIRED: Phien dang nhap Shopee da het han. Vui long dang nhap lai.");
+  }
+
+  throw new Error("Hay mo trang https://affiliate.shopee.vn/offer/custom_link truoc khi generate.");
 }
 
 async function getConfig() {

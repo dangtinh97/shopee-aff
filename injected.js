@@ -4,6 +4,7 @@
   const EXTENSION_SOURCE = "shopee-affiliate-extension";
   const PAGE_SOURCE = "shopee-affiliate-page";
   const DEFAULT_TIMEOUT_MS = 15_000;
+  const DOM_WAIT_TIMEOUT_MS = 6_000;
   const CLOSE_MODAL_DELAY_MS = 1_000;
   const MOCK_AFFILIATE_RESULT = {
     shortLink: "https://s.shopee.vn/2g9WR7chzl",
@@ -263,7 +264,19 @@
     }));
   }
 
+  function checkSessionOrThrow() {
+    const currentHref = window.location.href;
+    if (
+      currentHref.includes("/buyer/login") ||
+      currentHref.includes("/login") ||
+      currentHref.includes("accounts.shopee.vn")
+    ) {
+      throw new Error("SESSION_EXPIRED: Phien dang nhap Shopee da het han. Vui long dang nhap lai.");
+    }
+  }
+
   async function waitForElement(selector, timeoutMs) {
+    checkSessionOrThrow();
     const existingElement = document.querySelector(selector);
 
     if (existingElement) {
@@ -273,10 +286,28 @@
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         observer.disconnect();
+        try {
+          checkSessionOrThrow();
+        } catch (error) {
+          reject(error);
+          return;
+        }
         reject(new Error(`Khong tim thay element: ${selector}`));
       }, timeoutMs);
 
       const observer = new MutationObserver(() => {
+        const currentHref = window.location.href;
+        if (
+          currentHref.includes("/buyer/login") ||
+          currentHref.includes("/login") ||
+          currentHref.includes("accounts.shopee.vn")
+        ) {
+          clearTimeout(timeoutId);
+          observer.disconnect();
+          reject(new Error("SESSION_EXPIRED: Phien dang nhap Shopee da het han. Vui long dang nhap lai."));
+          return;
+        }
+
         const element = document.querySelector(selector);
 
         if (!element) {
@@ -360,9 +391,10 @@
   }
 
   async function fillUrlAndSubmit(url, subId1, timeoutMs, testMode) {
+    const domTimeoutMs = Math.min(timeoutMs, DOM_WAIT_TIMEOUT_MS);
     const injectedFields = [
-      await fillWrappedField("#customLink_original_url", url, timeoutMs),
-      await fillSubId1(subId1, timeoutMs)
+      await fillWrappedField("#customLink_original_url", url, domTimeoutMs),
+      await fillSubId1(subId1, domTimeoutMs)
     ].filter(Boolean);
 
     window.__shopeeAffiliateLastInject = {
@@ -379,7 +411,7 @@
 
     const button = await waitForElement(
       ".ant-form-item-children button",
-      timeoutMs
+      domTimeoutMs
     );
 
     button.click();
@@ -439,9 +471,9 @@
           }
 
           cleanup();
-          closeAffiliateModal()
-            .then(() => resolve(result))
-            .catch(() => resolve(result));
+          // Tra ket qua ngay lap tuc de khong bi chan boi close modal delay
+          resolve(result);
+          closeAffiliateModal().catch(() => {});
         },
         resolve: (result) => {
           if (settled) {

@@ -346,6 +346,27 @@
       background: #fff8e6;
       color: #8a5a00;
     }
+
+    #sessionStatus {
+      display: none;
+      margin-top: 0;
+      margin-bottom: 6px;
+      min-height: auto;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    #sessionStatus[data-state="expired"] {
+      display: block;
+      background: #fff1f0;
+      color: #b42318;
+    }
+
+    #sessionStatus[data-state="reloading"] {
+      display: block;
+      background: #e6f4ff;
+      color: #0958d9;
+    }
   </style>
 </head>
 <body>
@@ -393,6 +414,7 @@
         <span class="switch-track" aria-hidden="true"></span>
       </label>
     </div>
+    <output id="sessionStatus" aria-live="polite"></output>
     <output id="modeStatus" aria-live="polite"></output>
     <output id="linkCheckStatus" aria-live="polite"></output>
     <output id="mqttStatus" aria-live="polite"></output>

@@ -1,6 +1,7 @@
 "use strict";
 
-const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_TIMEOUT_MS = 20_000;
+const WATCHDOG_TIMEOUT_MS = 25_000;
 const MQTT_REQUEST_TOPIC = "shopee/aff";
 const MQTT_RESPONSE_TOPIC = "shopee/aff/response";
 const MQTT_ERROR_LINK_TOPIC = "error_link";
@@ -37,6 +38,7 @@ let mqttRequestQueue = [];
 let mqttQueueProcessing = false;
 let activeGenerateCount = 0;
 let reloadInProgress = false;
+let tabReloadPromise = null;
 let statsUpdatePromise = Promise.resolve();
 let mqttStatus = {
   connected: false,
@@ -55,6 +57,8 @@ const DEFAULT_AFFILIATE_STATS = {
   lastReloadAt: undefined,
   reloadWaiting: false,
   reloadWaitReason: "",
+  sessionExpired: false,
+  sessionError: "",
   updatedAt: Date.now()
 };
 
@@ -74,18 +78,74 @@ function isMqttSocketOpen() {
   return mqttSocket?.readyState === WebSocket.OPEN && mqttConnected;
 }
 
+function isRequiredCustomLinkUrl(url) {
+  try {
+    const parsedUrl = new URL(url);
+    const requiredUrl = new URL(REQUIRED_CUSTOM_LINK_URL);
+
+    return (
+      parsedUrl.origin === requiredUrl.origin &&
+      parsedUrl.pathname === requiredUrl.pathname
+    );
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function waitForTabReady() {
+  if (tabReloadPromise) {
+    await updateAffiliateStats({
+      reloadWaiting: true,
+      reloadWaitReason: "Tab dang reload, doi trang Shopee san sang..."
+    });
+    try {
+      await tabReloadPromise;
+    } finally {
+      await updateAffiliateStats({
+        reloadWaiting: false,
+        reloadWaitReason: ""
+      });
+    }
+  }
+}
+
 async function findAffiliateTab() {
-  const tabs = await chrome.tabs.query({
-    url: "https://affiliate.shopee.vn/*"
-  });
+  const allTabs = await chrome.tabs.query({});
 
-  const tab = tabs.find((candidate) => candidate.id);
+  // 1. Tim tab dang o dung https://affiliate.shopee.vn/offer/custom_link
+  const validTab = allTabs.find((tab) =>
+    tab.id && tab.url && isRequiredCustomLinkUrl(tab.url)
+  );
 
-  if (!tab?.id) {
-    throw new Error("Khong tim thay tab affiliate.shopee.vn dang mo.");
+  if (validTab) {
+    return validTab;
   }
 
-  return tab;
+  // 2. Kiem tra xem co tab Shopee nao bi vang ra trang login khong
+  const loginTab = allTabs.find((tab) =>
+    tab.id && tab.url && (
+      tab.url.includes("/buyer/login") ||
+      tab.url.includes("/login") ||
+      tab.url.includes("accounts.shopee.vn")
+    ) && (
+      tab.url.includes("shopee.vn") || tab.url.includes("shopee")
+    )
+  );
+
+  if (loginTab) {
+    throw new Error("SESSION_EXPIRED: Phien dang nhap Shopee da het han. Vui long dang nhap lai.");
+  }
+
+  // 3. Kiem tra xem co tab affiliate nao dang o sai URL khong
+  const anyAffiliateTab = allTabs.find((tab) =>
+    tab.id && tab.url && tab.url.startsWith("https://affiliate.shopee.vn")
+  );
+
+  if (anyAffiliateTab) {
+    throw new Error(`WRONG_TAB: Tab affiliate dang o sai dia chi (${anyAffiliateTab.url}). Yeu cau: ${REQUIRED_CUSTOM_LINK_URL}`);
+  }
+
+  throw new Error(`Khong tim thay tab ${REQUIRED_CUSTOM_LINK_URL} dang mo trong Chrome.`);
 }
 
 function normalizeMqttPayload(payload) {
@@ -201,6 +261,7 @@ async function saveFailedLink(failure) {
 }
 
 async function generateFromMqttPayload(payload) {
+  await waitForTabReady();
   const tab = await findAffiliateTab();
   const params = normalizeMqttPayload(payload);
   activeGenerateCount += 1;
@@ -221,7 +282,9 @@ async function generateFromMqttPayload(payload) {
 
   await updateAffiliateStats((stats) => ({
     createdCount: Number(stats.createdCount || 0) + 1,
-    lastCreatedAt: Date.now()
+    lastCreatedAt: Date.now(),
+    sessionExpired: false,
+    sessionError: ""
   }));
 
   return response;
@@ -240,24 +303,39 @@ async function sendGenerateMessageToTab(tabId, params) {
     }
   };
 
-  try {
-    return await chrome.tabs.sendMessage(tabId, message);
-  } catch (error) {
-    if (!error.message?.includes("Receiving end does not exist")) {
-      throw error;
+  const executeSend = async () => {
+    try {
+      return await chrome.tabs.sendMessage(tabId, message);
+    } catch (error) {
+      if (!error.message?.includes("Receiving end does not exist")) {
+        throw error;
+      }
+
+      await chrome.scripting.executeScript({
+        target: {
+          tabId
+        },
+        files: [
+          "content.js"
+        ]
+      });
+
+      return chrome.tabs.sendMessage(tabId, message);
     }
+  };
 
-    await chrome.scripting.executeScript({
-      target: {
-        tabId
-      },
-      files: [
-        "content.js"
-      ]
-    });
+  // Watchdog timeout de dam bao hang doi khong bao gio bi ket neu tab bi treo
+  let watchdogTimer;
+  const watchdogPromise = new Promise((_, reject) => {
+    watchdogTimer = setTimeout(() => {
+      reject(new Error(`Timeout: Tab Shopee khong phan hoi trong ${WATCHDOG_TIMEOUT_MS / 1000}s.`));
+    }, WATCHDOG_TIMEOUT_MS);
+  });
 
-    return chrome.tabs.sendMessage(tabId, message);
-  }
+  return Promise.race([
+    executeSend().finally(() => clearTimeout(watchdogTimer)),
+    watchdogPromise
+  ]);
 }
 
 async function handleMqttMessage(topic, payload) {
@@ -276,6 +354,7 @@ async function handleMqttMessage(topic, payload) {
     };
   } catch (error) {
     const errorMessage = error.message || "Generate that bai.";
+    const isSessionExpired = errorMessage.includes("SESSION_EXPIRED");
 
     await saveFailedLink({
       request: payload,
@@ -287,14 +366,23 @@ async function handleMqttMessage(topic, payload) {
       requestTopic: topic,
       request: payload,
       error: errorMessage,
+      sessionExpired: isSessionExpired,
       checkedAt: Date.now()
     });
+
+    if (isSessionExpired) {
+      await updateAffiliateStats({
+        sessionExpired: true,
+        sessionError: errorMessage
+      });
+    }
 
     return {
       topic: MQTT_RESPONSE_TOPIC,
       requestTopic: topic,
       request: payload,
-      error: errorMessage
+      error: errorMessage,
+      sessionExpired: isSessionExpired
     };
   }
 }
@@ -331,6 +419,7 @@ async function processMqttQueue() {
 
   try {
     while (mqttRequestQueue.length > 0) {
+      await waitForTabReady();
       const message = mqttRequestQueue.shift();
       await setInProgressCount();
       const response = await handleMqttMessage(message.topic, message.payload);
@@ -688,20 +777,6 @@ async function getCurrentTab() {
   return tab;
 }
 
-function isRequiredCustomLinkUrl(url) {
-  try {
-    const parsedUrl = new URL(url);
-    const requiredUrl = new URL(REQUIRED_CUSTOM_LINK_URL);
-
-    return (
-      parsedUrl.origin === requiredUrl.origin &&
-      parsedUrl.pathname === requiredUrl.pathname
-    );
-  } catch (_error) {
-    return false;
-  }
-}
-
 async function disableLinkCheck() {
   await setConfig({
     linkCheckEnabled: false
@@ -717,6 +792,112 @@ async function setLinkCheckStatus(statusPatch) {
   });
 }
 
+async function reloadAffiliateTabSafely(tabId, timeoutMs = 30_000) {
+  if (tabReloadPromise) {
+    return tabReloadPromise;
+  }
+
+  tabReloadPromise = new Promise((resolve, reject) => {
+    let cleanup = () => {};
+
+    const timeoutTimer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timeout khi reload tab affiliate."));
+    }, timeoutMs);
+
+    const onUpdatedListener = (updatedTabId, changeInfo) => {
+      if (updatedTabId !== tabId) {
+        return;
+      }
+
+      if (changeInfo.status === "complete") {
+        cleanup();
+        // Cho 2000ms de React bundle load & render form
+        sleep(2000)
+          .then(async () => {
+            // Ping thu content script de kiem tra san sang
+            for (let i = 0; i < 6; i++) {
+              try {
+                const res = await chrome.tabs.sendMessage(tabId, {
+                  source: "shopee-affiliate-extension-background",
+                  type: "PING_READINESS"
+                });
+
+                if (res?.isLogin) {
+                  throw new Error("SESSION_EXPIRED: Tab vua reload da bi chuyen sang trang dang nhap.");
+                }
+
+                if (res?.ready) {
+                  break;
+                }
+              } catch (e) {
+                if (e.message?.includes("SESSION_EXPIRED")) {
+                  throw e;
+                }
+                try {
+                  await chrome.scripting.executeScript({
+                    target: { tabId },
+                    files: ["content.js"]
+                  });
+                } catch (_) {}
+              }
+              await sleep(1000);
+            }
+          })
+          .then(resolve)
+          .catch(reject);
+      }
+    };
+
+    cleanup = () => {
+      clearTimeout(timeoutTimer);
+      chrome.tabs.onUpdated.removeListener(onUpdatedListener);
+    };
+
+    chrome.tabs.onUpdated.addListener(onUpdatedListener);
+
+    chrome.tabs.reload(tabId).catch((err) => {
+      cleanup();
+      reject(err);
+    });
+  })
+    .finally(() => {
+      tabReloadPromise = null;
+    });
+
+  return tabReloadPromise;
+}
+
+// Bat su kien neu nguoi dung tu bam F5 / reload tab Shopee affiliate
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (
+    changeInfo.status === "loading" &&
+    tab.url &&
+    tab.url.startsWith("https://affiliate.shopee.vn")
+  ) {
+    if (!tabReloadPromise) {
+      tabReloadPromise = new Promise((resolve) => {
+        let timer;
+        const checkListener = (updatedId, innerChangeInfo) => {
+          if (updatedId === tabId && innerChangeInfo.status === "complete") {
+            chrome.tabs.onUpdated.removeListener(checkListener);
+            clearTimeout(timer);
+            sleep(2000).then(resolve);
+          }
+        };
+
+        chrome.tabs.onUpdated.addListener(checkListener);
+        timer = setTimeout(() => {
+          chrome.tabs.onUpdated.removeListener(checkListener);
+          resolve();
+        }, 30_000);
+      }).finally(() => {
+        tabReloadPromise = null;
+      });
+    }
+  }
+});
+
 async function checkCurrentTabLink(tabSnapshot) {
   const config = await getConfig();
 
@@ -731,41 +912,61 @@ async function checkCurrentTabLink(tabSnapshot) {
     return result;
   }
 
-  const tab = tabSnapshot || await getCurrentTab();
-  const currentUrl = tab?.url || "";
+  // Khong bat buoc tab phai dang active.
+  // Mien la trong Chrome co tab https://affiliate.shopee.vn/offer/custom_link dang mo la hop le.
+  try {
+    const tab = tabSnapshot && isRequiredCustomLinkUrl(tabSnapshot.url)
+      ? tabSnapshot
+      : await findAffiliateTab();
 
-  if (isRequiredCustomLinkUrl(currentUrl)) {
     const result = {
       enabled: true,
       ok: true,
-      currentUrl,
-      tabId: tab?.id
+      currentUrl: tab.url,
+      tabId: tab.id
     };
 
     await setLinkCheckStatus(result);
+    await updateAffiliateStats({
+      sessionExpired: false,
+      sessionError: ""
+    });
+
+    return result;
+  } catch (error) {
+    const errorMessage = error.message || "Khong tim thay tab affiliate hop le.";
+    const isSessionExpired = errorMessage.includes("SESSION_EXPIRED");
+
+    const result = {
+      enabled: false,
+      ok: false,
+      sessionExpired: isSessionExpired,
+      topic: MQTT_ERROR_LINK_TOPIC,
+      requiredUrl: REQUIRED_CUSTOM_LINK_URL,
+      currentUrl: tabSnapshot?.url || "",
+      error: errorMessage,
+      tabId: tabSnapshot?.id,
+      checkedAt: Date.now()
+    };
+
+    publishErrorLink(result);
+    await saveFailedLink({
+      url: tabSnapshot?.url || "",
+      requestTopic: MQTT_ERROR_LINK_TOPIC,
+      error: errorMessage
+    });
+    await disableLinkCheck();
+    await setLinkCheckStatus(result);
+
+    if (isSessionExpired) {
+      await updateAffiliateStats({
+        sessionExpired: true,
+        sessionError: errorMessage
+      });
+    }
+
     return result;
   }
-
-  const result = {
-    enabled: false,
-    ok: false,
-    topic: MQTT_ERROR_LINK_TOPIC,
-    requiredUrl: REQUIRED_CUSTOM_LINK_URL,
-    currentUrl,
-    tabId: tab?.id,
-    checkedAt: Date.now()
-  };
-
-  publishErrorLink(result);
-  await saveFailedLink({
-    url: currentUrl,
-    requestTopic: MQTT_ERROR_LINK_TOPIC,
-    error: "Tab affiliate dang sai link."
-  });
-  await disableLinkCheck();
-  await setLinkCheckStatus(result);
-
-  return result;
 }
 
 async function getAffiliateProcessingStatus() {
@@ -820,7 +1021,13 @@ async function reloadAffiliateTabIfIdle(force = false) {
   try {
     const tab = await findAffiliateTab();
 
-    await chrome.tabs.reload(tab.id);
+    await updateAffiliateStats({
+      reloadWaiting: true,
+      reloadWaitReason: "Dang an toan reload tab affiliate..."
+    });
+
+    await reloadAffiliateTabSafely(tab.id);
+
     await updateAffiliateStats({
       lastReloadAt: now,
       reloadWaiting: false,
